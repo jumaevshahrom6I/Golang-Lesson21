@@ -1,0 +1,804 @@
+# Шпаргалка
+## Go + PostgreSQL + database/sql
+
+---
+
+# 1. Подключение к базе данных
+
+Импорт:
+
+```go
+import (
+    "database/sql"
+    _ "github.com/lib/pq"
+)
+```
+
+Подключение:
+
+```go
+db, err := sql.Open(
+    "postgres",
+    "host=localhost port=5432 user=postgres password=secret dbname=coursedb sslmode=disable",
+)
+
+if err != nil {
+    panic(err)
+}
+```
+
+Важно:
+
+`sql.Open()` НЕ подключается сразу к базе.
+
+Он только создаёт объект подключения и пул соединений.
+
+Проверка:
+
+```go
+err = db.Ping()
+
+if err != nil {
+    panic(err)
+}
+```
+
+---
+
+# 2. Закрытие подключения
+
+После работы:
+
+```go
+defer db.Close()
+```
+
+---
+
+# 3. Основные методы database/sql
+
+
+## SELECT несколько строк
+
+Использовать:
+
+```go
+db.Query()
+```
+
+Пример:
+
+```go
+rows, err := db.Query(
+    "SELECT id, title FROM books",
+)
+
+if err != nil {
+    panic(err)
+}
+
+defer rows.Close()
+
+
+for rows.Next() {
+
+    var (
+        id int
+        title string
+    )
+
+    err := rows.Scan(
+        &id,
+        &title,
+    )
+
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(id, title)
+}
+```
+
+Используется для:
+
+- список пользователей;
+- список книг;
+- список товаров.
+
+
+Схема:
+
+```
+Query()
+   |
+   v
+rows
+   |
+   v
+rows.Next()
+   |
+   v
+rows.Scan()
+```
+
+---
+
+# 4. SELECT одна строка
+
+
+Использовать:
+
+```go
+db.QueryRow()
+```
+
+
+Пример:
+
+```go
+var (
+    id int
+    title string
+)
+
+
+err := db.QueryRow(
+    `
+    SELECT id, title
+    FROM books
+    WHERE id=$1
+    `,
+    5,
+).Scan(
+    &id,
+    &title,
+)
+
+
+if err != nil {
+    panic(err)
+}
+```
+
+
+Используется для:
+
+- найти пользователя по ID;
+- получить одну запись;
+- получить COUNT.
+
+
+---
+
+# 5. Получение количества записей
+
+
+SQL:
+
+```sql
+SELECT COUNT(*) FROM books;
+```
+
+
+Go:
+
+```go
+var count int
+
+
+err := db.QueryRow(
+    "SELECT COUNT(*) FROM books",
+).Scan(&count)
+```
+
+
+---
+
+# 6. INSERT / UPDATE / DELETE
+
+
+Использовать:
+
+```go
+db.Exec()
+```
+
+
+## INSERT
+
+```go
+_, err := db.Exec(
+`
+INSERT INTO books(title, author)
+VALUES($1,$2)
+`,
+"Clean Code",
+"Robert Martin",
+)
+```
+
+
+---
+
+## UPDATE
+
+
+```go
+_, err := db.Exec(
+`
+UPDATE books
+SET price=$1
+WHERE id=$2
+`,
+200,
+1,
+)
+```
+
+
+---
+
+## DELETE
+
+
+```go
+_, err := db.Exec(
+`
+DELETE FROM books
+WHERE id=$1
+`,
+10,
+)
+```
+
+
+---
+
+# 7. Проверка изменения данных
+
+
+После:
+
+- UPDATE
+- DELETE
+
+
+Можно узнать сколько строк изменилось:
+
+
+```go
+result, err := db.Exec(
+`
+DELETE FROM books
+WHERE id=$1
+`,
+10,
+)
+
+
+count, err := result.RowsAffected()
+
+
+fmt.Println(count)
+```
+
+
+Пример:
+
+```
+Удалено: 1
+```
+
+
+Если:
+
+```
+Удалено: 0
+```
+
+значит записи нет.
+
+---
+
+# 8. INSERT + получить новый ID
+
+
+В PostgreSQL используют:
+
+```sql
+RETURNING id
+```
+
+
+Пример:
+
+
+```go
+var id int
+
+
+err := db.QueryRow(
+`
+INSERT INTO books(title, author)
+VALUES($1,$2)
+RETURNING id
+`,
+"Go",
+"Donovan",
+).Scan(&id)
+
+
+fmt.Println(id)
+```
+
+
+---
+
+# 9. Параметры SQL
+
+
+Нельзя:
+
+```go
+query := "SELECT * FROM users WHERE id=" + id
+```
+
+
+Правильно:
+
+```go
+SELECT *
+FROM users
+WHERE id=$1
+```
+
+
+Go:
+
+```go
+db.QueryRow(query, id)
+```
+
+
+Плюсы:
+
+- безопасность;
+- защита от SQL-инъекций;
+- правильная работа типов.
+
+
+---
+
+# 10. Пул соединений
+
+
+`database/sql` автоматически использует пул.
+
+
+Настройки:
+
+
+Максимум соединений:
+
+```go
+db.SetMaxOpenConns(25)
+```
+
+
+Свободные соединения:
+
+```go
+db.SetMaxIdleConns(5)
+```
+
+
+Время жизни соединения:
+
+```go
+db.SetConnMaxLifetime(time.Minute * 5)
+```
+
+
+---
+
+# 11. Как выбрать метод?
+
+
+```
+Нужно получить много строк?
+          |
+          v
+      db.Query()
+
+
+Нужно получить одну строку?
+          |
+          v
+      db.QueryRow()
+
+
+INSERT?
+UPDATE?
+DELETE?
+          |
+          v
+      db.Exec()
+```
+
+
+---
+
+# 12. CRUD соответствие
+
+
+SQL:
+
+```
+CREATE
+INSERT
+SELECT
+UPDATE
+DELETE
+```
+
+
+Go:
+
+
+```
+INSERT
+UPDATE
+DELETE
+        |
+        v
+     Exec()
+
+
+SELECT много
+        |
+        v
+     Query()
+
+
+SELECT одна
+        |
+        v
+     QueryRow()
+```
+
+
+---
+
+# 13. Минимальный набор, который нужно знать новичку
+
+
+Обязательно знать(чек-лист):
+
+
+✅ sql.Open()
+
+✅ db.Ping()
+
+✅ db.Close()
+
+✅ db.Query()
+
+✅ rows.Next()
+
+✅ rows.Scan()
+
+✅ db.QueryRow()
+
+✅ db.Exec()
+
+✅ RowsAffected()
+
+✅ RETURNING id
+
+✅ параметры $1, $2
+
+Комментарии:
+
+✅ sql.Open()
+
+Создаёт подключение к базе данных (пул соединений).
+
+Важно:
+sql.Open() сам не подключается к БД.
+Он только создаёт объект для работы с базой.
+
+Пример:
+
+db, err := sql.Open("postgres", connStr)
+
+
+--------------------------------------------------
+
+
+✅ db.Ping()
+
+Проверяет, есть ли реальное соединение с базой.
+
+Используют сразу после sql.Open().
+
+Пример:
+
+err := db.Ping()
+
+
+Если ошибка:
+- база выключена;
+- неправильный пароль;
+- неправильный адрес.
+
+
+--------------------------------------------------
+
+
+✅ db.Close()
+
+Закрывает подключение к базе данных.
+
+Обычно:
+
+defer db.Close()
+
+
+Вызывается при завершении программы.
+
+
+--------------------------------------------------
+
+
+✅ db.Query()
+
+Выполняет SELECT, который возвращает несколько строк.
+
+Например:
+
+Получить всех пользователей:
+
+SELECT * FROM users;
+
+
+Возвращает:
+
+rows
+
+
+Дальше используется:
+
+rows.Next()
+rows.Scan()
+
+
+--------------------------------------------------
+
+
+✅ rows.Next()
+
+Переходит к следующей строке результата.
+
+Используется в цикле:
+
+for rows.Next() {
+
+}
+
+
+Пример:
+
+1 строка → обработали
+2 строка → обработали
+3 строка → обработали
+
+
+--------------------------------------------------
+
+
+✅ rows.Scan()
+
+Берёт данные из текущей строки и записывает их в переменные Go.
+
+
+SQL:
+
+id | name
+
+1  | Alex
+
+
+Go:
+
+rows.Scan(&id, &name)
+
+
+После Scan:
+
+id = 1
+name = "Alex"
+
+
+--------------------------------------------------
+
+
+✅ db.QueryRow()
+
+Используется, когда ожидаем только одну строку.
+
+
+Например:
+
+Найти пользователя по ID:
+
+SELECT * FROM users WHERE id=1;
+
+
+Используется вместе с:
+
+.Scan()
+
+
+Пример:
+
+db.QueryRow(query, id).Scan(&name)
+
+
+--------------------------------------------------
+
+
+✅ db.Exec()
+
+Исполняет SQL, который не возвращает строки.
+
+
+Используется для:
+
+
+INSERT
+
+UPDATE
+
+DELETE
+
+
+Примеры:
+
+
+Добавить:
+
+INSERT INTO users ...
+
+
+Изменить:
+
+UPDATE users ...
+
+
+Удалить:
+
+DELETE FROM users ...
+
+
+--------------------------------------------------
+
+
+✅ RowsAffected()
+
+Показывает, сколько строк изменилось.
+
+
+Например:
+
+DELETE FROM users WHERE id=5
+
+
+Результат:
+
+
+RowsAffected = 1
+
+
+Значит пользователь удалён.
+
+
+Если:
+
+RowsAffected = 0
+
+
+Значит такой записи нет.
+
+
+--------------------------------------------------
+
+
+✅ RETURNING id
+
+PostgreSQL возможность получить созданный ID после INSERT.
+
+
+Например:
+
+INSERT INTO users(name)
+VALUES('Alex')
+RETURNING id;
+
+
+Вернёт:
+
+
+id = 10
+
+
+Используется вместе с:
+
+QueryRow()
+
+
+--------------------------------------------------
+
+
+✅ Параметры $1, $2
+
+
+Способ передавать значения в SQL безопасно.
+
+
+Плохо:
+
+
+"SELECT * FROM users WHERE id=" + id
+
+
+Хорошо:
+
+
+SELECT *
+FROM users
+WHERE id=$1
+
+
+Go:
+
+
+db.QueryRow(query, id)
+
+
+Плюсы:
+
+- защита от SQL-инъекций;
+- правильная передача типов;
+- читаемый код.
+
+
+--------------------------------------------------
+
+
+Кратко:
+
+SELECT много записей
+        ↓
+    db.Query()
+        ↓
+    rows.Next()
+        ↓
+    rows.Scan()
+
+
+SELECT одна запись
+        ↓
+    db.QueryRow()
+        ↓
+    Scan()
+
+
+INSERT / UPDATE / DELETE
+        ↓
+    db.Exec()
+
+
+INSERT + получить ID
+        ↓
+    RETURNING id
