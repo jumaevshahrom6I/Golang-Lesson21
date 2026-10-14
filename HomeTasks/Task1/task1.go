@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	dsn := "host=localhost port=5432 user=postgres password=js0770 dbname=myhomeworkdb sslmode=disable"
+	dsn := "host=localhost port=5432 user=postgres password=secretpaswword dbname=myhomeworkdb sslmode=disable"
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
